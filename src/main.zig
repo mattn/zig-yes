@@ -4,10 +4,8 @@ pub fn main() anyerror!void {
     const a = std.heap.page_allocator;
 
     const args = try std.process.argsAlloc(a);
-    defer a.free(args);
 
     var bytes = std.ArrayList(u8).init(a);
-    defer bytes.deinit();
     if (args.len > 1) {
         for (args[1..args.len]) |arg, i| {
             if (i > 0) try bytes.writer().writeAll(" ");
@@ -17,6 +15,7 @@ pub fn main() anyerror!void {
         try bytes.writer().writeAll("y");
     }
     try bytes.writer().print("\n", .{});
+    a.free(args);
 
     var buf = std.ArrayList(u8).init(a);
     const bufsiz = 64 * 1024;
@@ -27,6 +26,7 @@ pub fn main() anyerror!void {
         try buf.writer().writeAll(bytes.items);
         copies -= 1;
     }
+    bytes.deinit();
 
     const writer = std.io.getStdOut().writer();
     while (true) {
