@@ -6,15 +6,16 @@ pub fn main() anyerror!void {
     const args = try std.process.argsAlloc(a);
 
     var bytes = std.ArrayList(u8).init(a);
+    var bytesWriter = bytes.writer();
     if (args.len > 1) {
         for (args[1..args.len]) |arg, i| {
-            if (i > 0) try bytes.writer().writeAll(" ");
-            try bytes.writer().writeAll(arg);
+            if (i > 0) try bytesWriter.writeAll(" ");
+            try bytesWriter.writeAll(arg);
         }
     } else {
-        try bytes.writer().writeAll("y");
+        try bytesWriter.writeAll("y");
     }
-    try bytes.writer().print("\n", .{});
+    try bytesWriter.writeAll("\n");
     a.free(args);
 
     var buf = std.ArrayList(u8).init(a);
