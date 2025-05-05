@@ -8,7 +8,7 @@ pub fn main() anyerror!void {
     var bytes = std.ArrayList(u8).init(a);
     var bytesWriter = bytes.writer();
     if (args.len > 1) {
-        for (args[1..args.len]) |arg, i| {
+        for (args[1..args.len], 1..args.len) |arg, i| {
             if (i > 0) try bytesWriter.writeAll(" ");
             try bytesWriter.writeAll(arg);
         }
@@ -20,7 +20,7 @@ pub fn main() anyerror!void {
 
     var buf = std.ArrayList(u8).init(a);
     const bufsiz = 64 * 1024;
-    var copysize = bytes.items.len;
+    const copysize = bytes.items.len;
 
     var copies = bufsiz / copysize;
     while (copies > 0) {
