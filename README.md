@@ -5,7 +5,7 @@ yes command written in Zig
 ## Installation
 
 ```
-$ zig build -Drelease-fast
+$ zig build -Doptimize=ReleaseFast
 ```
 
 ## License
