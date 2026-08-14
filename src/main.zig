@@ -1,4 +1,17 @@
 const std = @import("std");
+const linux = std.os.linux;
+
+const F_SETPIPE_SZ = 1031;
+
+fn writeLoop(buf: []const u8) void {
+    while (true) {
+        var rem = buf;
+        while (rem.len > 0) {
+            const n = std.posix.write(1, rem) catch return;
+            rem = rem[n..];
+        }
+    }
+}
 
 pub fn main() anyerror!void {
     const a = std.heap.page_allocator;
@@ -18,25 +31,48 @@ pub fn main() anyerror!void {
     try bytesWriter.writeAll("\n");
     a.free(args);
 
-    var buf = std.ArrayList(u8){};
-    // 8KiB matches GNU yes; on pipes, filling the whole (64KiB) pipe buffer
-    // per write causes reader/writer lockstep and hurts throughput.
-    const bufsiz = 8 * 1024;
+    // Fill a page-aligned block with whole copies of the line so every
+    // syscall stays line-aligned. page_allocator returns page-aligned
+    // memory, which vmsplice below wants.
     const copysize = bytes.items.len;
-    const bufWriter = buf.writer(a);
-
-    var copies = @max(1, bufsiz / copysize);
-    while (copies > 0) {
-        try bufWriter.writeAll(bytes.items);
-        copies -= 1;
+    const bufsiz = @max(64 * 1024, copysize);
+    const buf = try a.alloc(u8, (bufsiz / copysize) * copysize);
+    var off: usize = 0;
+    while (off < buf.len) : (off += copysize) {
+        @memcpy(buf[off .. off + copysize], bytes.items);
     }
     bytes.deinit(a);
 
-    var outbuf: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&outbuf);
-    const stdout = &stdout_writer.interface;
-    while (true) {
-        // Exit quietly when the pipe is closed (EPIPE), like GNU yes.
-        stdout.writeAll(buf.items) catch break;
+    // A larger pipe buffer reduces reader/writer lockstep; best effort.
+    _ = linux.fcntl(1, F_SETPIPE_SZ, 1024 * 1024);
+
+    // Zero-copy path: vmsplice maps the pages of our immutable buffer into
+    // the pipe instead of copying them. The pages must never be modified
+    // afterwards, which holds here. Falls back to plain write(2) when
+    // stdout is not a pipe (or vmsplice is unavailable).
+    // Short splices are frequent when the pipe is nearly full, and
+    // resplicing an unaligned tail is ~2x slower than starting over from
+    // the page-aligned buffer start. So when a cut lands on a line
+    // boundary, restart; otherwise splice just enough to finish the torn
+    // line first.
+    outer: while (true) {
+        var pos: usize = 0;
+        var len: usize = buf.len;
+        while (true) {
+            const iov = [1]std.posix.iovec_const{.{ .base = buf.ptr + pos, .len = len }};
+            const rc = linux.syscall4(.vmsplice, 1, @intFromPtr(&iov), 1, 0);
+            switch (linux.E.init(rc)) {
+                .SUCCESS => {},
+                .INTR => continue,
+                // Exit quietly when the reader is gone, like GNU yes.
+                .PIPE => return,
+                else => return writeLoop(buf),
+            }
+            const end = pos + rc;
+            const frac = end % copysize;
+            if (frac == 0) continue :outer;
+            pos = end;
+            len = copysize - frac;
+        }
     }
 }
