@@ -16,20 +16,20 @@ fn writeLoop(buf: []const u8) void {
 pub fn main() anyerror!void {
     const a = std.heap.page_allocator;
 
-    const args = try std.process.argsAlloc(a);
-
+    var args = std.process.args();
+    _ = args.skip();
     var bytes = std.ArrayList(u8){};
     var bytesWriter = bytes.writer(a);
-    if (args.len > 1) {
-        for (args[1..args.len], 1..args.len) |arg, i| {
-            if (i > 1) try bytesWriter.writeAll(" ");
+    if (args.next()) |first| {
+        try bytesWriter.writeAll(first);
+        while (args.next()) |arg| {
+            try bytesWriter.writeAll(" ");
             try bytesWriter.writeAll(arg);
         }
     } else {
         try bytesWriter.writeAll("y");
     }
     try bytesWriter.writeAll("\n");
-    a.free(args);
 
     // Fill a page-aligned block with whole copies of the line so every
     // syscall stays line-aligned. page_allocator returns page-aligned
@@ -37,9 +37,12 @@ pub fn main() anyerror!void {
     const copysize = bytes.items.len;
     const bufsiz = @max(64 * 1024, copysize);
     const buf = try a.alloc(u8, (bufsiz / copysize) * copysize);
-    var off: usize = 0;
-    while (off < buf.len) : (off += copysize) {
-        @memcpy(buf[off .. off + copysize], bytes.items);
+    @memcpy(buf[0..copysize], bytes.items);
+    var filled = copysize;
+    while (filled < buf.len) {
+        const n = @min(filled, buf.len - filled);
+        @memcpy(buf[filled .. filled + n], buf[0..n]);
+        filled += n;
     }
     bytes.deinit(a);
 
